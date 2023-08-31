@@ -1,14 +1,45 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
 const jwt = require('jsonwebtoken');
 const stripe = require('stripe')(process.env.PAYMENT_SECRET_KEY);
+const nodemailer = require("nodemailer");
+const mg = require('nodemailer-mailgun-transport');
+require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 5000;
 
 // middleware 
 app.use(cors());
 app.use(express.json());
+
+
+let transporter = nodemailer.createTransport({
+    host: 'smtp.sendgrid.net',
+    port: 587,
+    auth: {
+        user: "apikey",
+        pass: process.env.SENDGRID_API_KEY
+    }
+})
+
+// send payments confirmation email
+const sendPaymentConfirmationEmail = payment => {
+    transporter.sendMail({
+        from: "SENDER_EMAIL", // verified sender email
+        to: "RECIPIENT_EMAIL", // recipient email
+        subject: "Test message subject", // Subject line
+        text: "Hello world!", // plain text body
+        html: "<b>Hello world!</b>", // html body
+    }, function (error, info) {
+        if (error) {
+            console.log(error);
+        } else {
+            console.log('Email sent: ' + info.response);
+        }
+    });
+
+}
+
 
 // verify jwt 
 const verifyJWT = (req, res, next) => {
@@ -202,6 +233,9 @@ async function run() {
             const query = { _id: { $in: payment.cartItems.map(id => new ObjectId(id)) } };
             const deleteResult = await cartCollection.deleteMany(query);
 
+            // send an email 
+            sendPaymentConfirmationEmail(payment);
+
             res.send({ insertResult, deleteResult });
         })
 
@@ -227,7 +261,7 @@ async function run() {
             })
         })
 
-        app.get('/order-stats', verifyJWT, verifyAdmin, async(req, res) => {
+        app.get('/order-stats', verifyJWT, verifyAdmin, async (req, res) => {
             const pipeline = [
                 {
                     $lookup: {
@@ -243,15 +277,15 @@ async function run() {
                 {
                     $group: {
                         _id: '$menuItemsData.category',
-                        count: {$sum: 1},
-                        total: {$sum: '$menuItemsData.price'}
+                        count: { $sum: 1 },
+                        total: { $sum: '$menuItemsData.price' }
                     }
                 },
                 {
                     $project: {
                         category: '$_id',
                         count: 1,
-                        total: {$round: ['$total', 2]},
+                        total: { $round: ['$total', 2] },
                         _id: 0
                     }
                 }
